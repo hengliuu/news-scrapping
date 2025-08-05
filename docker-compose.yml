@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  news-scrapping:
+    build: .
+    ports:
+      - "6005:6005"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - PORT=6005
+      - GIN_MODE=release
+      - TZ=Asia/Jakarta
+      - LOG_LEVEL=info
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a monitoring container
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 300
