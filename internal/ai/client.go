@@ -14,14 +14,20 @@ import (
 
 // Client handles Gemini AI operations
 type Client struct {
-	client *genai.Client
-	model  *genai.GenerativeModel
+	client       *genai.Client
+	model        *genai.GenerativeModel
+	maxNewsItems int
 }
 
 // New creates a new Gemini AI client
 func New(apiKey string) (*Client, error) {
+	return NewWithConfig(apiKey, 5) // Default to 5 for backward compatibility
+}
+
+// NewWithConfig creates a new Gemini AI client with configurable max news items
+func NewWithConfig(apiKey string, maxNewsItems int) (*Client, error) {
 	ctx := context.Background()
-	
+
 	client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
@@ -29,7 +35,7 @@ func New(apiKey string) (*Client, error) {
 
 	// Use gemini-2.5-flash model as specified
 	model := client.GenerativeModel("gemini-2.5-flash")
-	
+
 	// Configure model parameters - use default max output tokens
 	model.SetTemperature(0.3)
 	model.SetTopK(40)
@@ -37,8 +43,9 @@ func New(apiKey string) (*Client, error) {
 	// Using default max output tokens (1,048,576) for gemini-2.5-flash
 
 	return &Client{
-		client: client,
-		model:  model,
+		client:       client,
+		model:        model,
+		maxNewsItems: maxNewsItems,
 	}, nil
 }
 
@@ -60,17 +67,23 @@ func (c *Client) ProcessNewsByType(newsItems []models.NewsItem, newsType string)
 
 	ctx := context.Background()
 
-	// Limit news items to prevent overwhelming the AI
+	// Limit news items to prevent overwhelming the AI and ensure quality processing
 	var maxArticles int
 	if newsType == "global" {
-		maxArticles = 15 // Global news can handle more with default token limit
+		maxArticles = 20 // Global news can handle more with default token limit
 	} else {
-		maxArticles = 12 // AI news
+		maxArticles = 15 // AI news - increased for better selection quality with top 10 output
 	}
-	
+
 	if len(newsItems) > maxArticles {
-		log.Printf("Limiting news items from %d to %d to prevent token overflow", len(newsItems), maxArticles)
+		log.Printf("Limiting news items from %d to %d to prevent token overflow and ensure quality processing", len(newsItems), maxArticles)
 		newsItems = newsItems[:maxArticles]
+	}
+
+	// Validate we have sufficient articles for meaningful curation
+	minArticlesRequired := c.maxNewsItems + 2 // Need at least 2 more than output for meaningful selection
+	if len(newsItems) < minArticlesRequired {
+		log.Printf("Warning: Only %d articles available for selecting top %d. Consider adjusting news sources or filtering criteria", len(newsItems), c.maxNewsItems)
 	}
 
 	// Limit summary length for better processing
@@ -90,23 +103,68 @@ func (c *Client) ProcessNewsByType(newsItems []models.NewsItem, newsType string)
 	estimatedTokens := len(string(articlesJSON)) / 4
 	log.Printf("Estimated input tokens: %d (from %d articles)", estimatedTokens, len(newsItems))
 
-	// Create type-specific prompt - simplified to reduce output tokens
+	// Create type-specific optimized prompts
 	var prompt string
 	if newsType == "global" {
-		prompt = fmt.Sprintf(`Select TOP 5 global business/tech/crypto news:
+		prompt = fmt.Sprintf(`You are an expert business and technology news curator for a daily Discord newsletter. Select the TOP %d most significant global business, technology, and cryptocurrency developments.
+
+## EVALUATION CRITERIA (in order of priority):
+
+1. **MARKET IMPACT** (40%% weight): Major market movements, IPOs, significant business decisions
+2. **INNOVATION** (25%% weight): New tech products, crypto developments, breakthrough innovations  
+3. **RECENCY** (20%% weight): Prefer articles from last 24-48 hours
+4. **GLOBAL SIGNIFICANCE** (15%% weight): Stories affecting multiple markets or regions
+
+## SELECTION RULES:
+✅ INCLUDE: Reputable publications, official announcements, market-moving news
+❌ EXCLUDE: Duplicates, opinion pieces, unverified rumors, articles >7 days old
+
+Return EXACTLY this JSON with %d items ranked by importance:
 
 %s
 
-JSON:
-{"news":[{"title":"","summary":"","url":"","source":"","relevance":""}]}`, string(articlesJSON))
+{"news":[{"title":"Clear headline (max 100 chars)","summary":"Key facts and implications (max 250 chars)","url":"original_url","source":"publication","relevance":"Why significant (max 100 chars)"}]}`, c.maxNewsItems, string(articlesJSON))
 	} else {
-		// AI-focused prompt (default)
-		prompt = fmt.Sprintf(`Select TOP 5 AI tech news:
+		// AI-focused optimized prompt
+		prompt = fmt.Sprintf(`You are an expert AI technology news curator for a daily Discord newsletter. Your task is to analyze the provided news articles and select the TOP %d most significant AI technology developments.
+
+## EVALUATION CRITERIA (in order of priority):
+
+1. **IMPACT SIGNIFICANCE** (40%% weight)
+   - Major product launches or updates from leading AI companies
+   - Breakthrough research publications or discoveries
+   - Significant funding rounds or acquisitions in AI
+   - New AI regulations or policy changes
+   - Industry partnerships or collaborations
+
+2. **RECENCY & RELEVANCE** (25%% weight)
+   - Prefer articles published within the last 24-48 hours
+   - Breaking news takes priority over older stories
+   - Ongoing developments with new updates
+
+3. **TECHNICAL INNOVATION** (20%% weight)
+   - New AI model architectures or capabilities
+   - Novel applications of existing AI technology
+   - Performance benchmarks or comparisons
+   - Open-source releases or tools
+
+4. **BUSINESS & MARKET IMPACT** (15%% weight)
+   - Market-moving announcements
+   - Strategic business decisions
+   - Industry adoption trends
+
+## SELECTION RULES:
+✅ INCLUDE: Reputable tech publications, official company announcements, major AI model updates, regulatory developments
+❌ EXCLUDE: Duplicate stories, opinion pieces without new info, marketing content, unverified rumors, articles >7 days old
+
+## DUPLICATE HANDLING:
+If multiple articles cover the same story, select the most comprehensive and recent version from official sources.
+
+Return EXACTLY this JSON structure with %d items ranked by importance:
 
 %s
 
-JSON:
-{"news":[{"title":"","summary":"","url":"","source":"","relevance":""}]}`, string(articlesJSON))
+{"news":[{"title":"Clear, engaging headline (max 100 chars)","summary":"Concise 2-3 sentence summary focusing on key facts and implications (max 250 chars)","url":"original_article_url","source":"publication_name","relevance":"Brief explanation of why this is significant (max 100 chars)"}]}`, c.maxNewsItems, string(articlesJSON))
 	}
 
 	// Generate content
@@ -127,7 +185,7 @@ JSON:
 			OutputTokens: resp.UsageMetadata.CandidatesTokenCount,
 			TotalTokens:  resp.UsageMetadata.TotalTokenCount,
 		}
-		log.Printf("Token usage - Input: %d, Output: %d, Total: %d", 
+		log.Printf("Token usage - Input: %d, Output: %d, Total: %d",
 			tokenUsage.InputTokens, tokenUsage.OutputTokens, tokenUsage.TotalTokens)
 	}
 
@@ -141,7 +199,7 @@ JSON:
 
 	// Clean the response text
 	responseText = strings.TrimSpace(responseText)
-	
+
 	// Check if response is empty
 	if responseText == "" {
 		log.Printf("Empty response from Gemini. Candidate count: %d", len(resp.Candidates))
@@ -153,41 +211,53 @@ JSON:
 		}
 		return nil, fmt.Errorf("empty response from Gemini AI")
 	}
-	
+
 	// Remove markdown code blocks if present
-	if strings.HasPrefix(responseText, "```json") {
-		responseText = strings.TrimPrefix(responseText, "```json")
-		responseText = strings.TrimSuffix(responseText, "```")
+	if after, found := strings.CutPrefix(responseText, "```json"); found {
+		responseText = strings.TrimSuffix(after, "```")
 		responseText = strings.TrimSpace(responseText)
-	} else if strings.HasPrefix(responseText, "```") {
-		responseText = strings.TrimPrefix(responseText, "```")
-		responseText = strings.TrimSuffix(responseText, "```")
+	} else if after, found := strings.CutPrefix(responseText, "```"); found {
+		responseText = strings.TrimSuffix(after, "```")
 		responseText = strings.TrimSpace(responseText)
 	}
 
 	log.Printf("Gemini response (%d chars): %s", len(responseText), responseText)
 
-	// Parse JSON response
+	// Parse JSON response with improved error handling
 	var newsResponse models.NewsResponse
 	if err := json.Unmarshal([]byte(responseText), &newsResponse); err != nil {
-		return nil, fmt.Errorf("failed to parse Gemini response as JSON: %w\nResponse: %s", err, responseText)
+		// Try to extract JSON from potentially malformed response
+		if jsonStart := strings.Index(responseText, "{"); jsonStart >= 0 {
+			if jsonEnd := strings.LastIndex(responseText, "}"); jsonEnd > jsonStart {
+				cleanJSON := responseText[jsonStart : jsonEnd+1]
+				log.Printf("Attempting to parse extracted JSON: %s", cleanJSON)
+				if retryErr := json.Unmarshal([]byte(cleanJSON), &newsResponse); retryErr == nil {
+					log.Printf("Successfully parsed extracted JSON")
+				} else {
+					return nil, fmt.Errorf("failed to parse Gemini response as JSON (retry also failed): %w\nOriginal response: %s", err, responseText)
+				}
+			} else {
+				return nil, fmt.Errorf("failed to parse Gemini response as JSON: %w\nResponse: %s", err, responseText)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to parse Gemini response as JSON: %w\nResponse: %s", err, responseText)
+		}
 	}
 
 	// Validate response
 	if len(newsResponse.News) == 0 {
-		return nil, fmt.Errorf("Gemini returned no news items")
+		return nil, fmt.Errorf("Gemini returned no news items. This may indicate low-quality input articles or overly restrictive filtering")
 	}
 
-	// Ensure we have at most 5 items for both types (to reduce output tokens)
-	maxItems := 5
-	if len(newsResponse.News) > maxItems {
-		newsResponse.News = newsResponse.News[:maxItems]
+	// Ensure we have at most the configured number of items
+	if len(newsResponse.News) > c.maxNewsItems {
+		newsResponse.News = newsResponse.News[:c.maxNewsItems]
 	}
 
 	// Add token usage to response
 	newsResponse.TokenUsage = tokenUsage
 
-	log.Printf("Gemini processed %d articles and returned %d top AI news items", len(newsItems), len(newsResponse.News))
+	log.Printf("Gemini processed %d articles and returned %d top news items", len(newsItems), len(newsResponse.News))
 
 	return &newsResponse, nil
 }

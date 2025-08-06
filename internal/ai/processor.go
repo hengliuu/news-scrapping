@@ -16,7 +16,7 @@ type Processor struct {
 
 // NewProcessor creates a new AI processor
 func NewProcessor(cfg *config.Config) (*Processor, error) {
-	client, err := New(cfg.GeminiAPIKey)
+	client, err := NewWithConfig(cfg.GeminiAPIKey, cfg.MaxNewsItems)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create AI client: %w", err)
 	}

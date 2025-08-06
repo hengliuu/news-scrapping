@@ -17,15 +17,15 @@ import (
 
 // Scheduler handles scheduled tasks
 type Scheduler struct {
-	cron      *cron.Cron
-	config    *config.Config
-	scraper   *scraper.Scraper
-	aiProcessor *ai.Processor
-	discord   *discord.WebhookClient
+	cron          *cron.Cron
+	config        *config.Config
+	scraper       *scraper.Scraper
+	aiProcessor   *ai.Processor
+	discord       *discord.WebhookClient
 	discordGlobal *discord.WebhookClient
-	jobStatus *models.JobStatus
-	mu        sync.RWMutex
-	running   bool
+	jobStatus     *models.JobStatus
+	mu            sync.RWMutex
+	running       bool
 }
 
 // New creates a new scheduler
@@ -42,12 +42,12 @@ func New(cfg *config.Config) *Scheduler {
 
 	// Initialize components
 	scraperInstance := scraper.New()
-	
+
 	aiProcessor, err := ai.NewProcessor(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create AI processor: %v", err)
 	}
-	
+
 	discordClient := discord.New(cfg.DiscordWebhook)
 	discordGlobalClient := discord.New(cfg.DiscordWebhookGlobal)
 
@@ -138,11 +138,11 @@ func (s *Scheduler) runNewsJob() {
 
 	if err := s.executeNewsJob(); err != nil {
 		log.Printf("Scheduled news job failed: %v", err)
-		
+
 		// Send error notification to Discord
-		errorMsg := fmt.Sprintf("❌ **News Bot Error**\n\nScheduled job failed at %s\n\nError: %s", 
+		errorMsg := fmt.Sprintf("❌ **News Bot Error**\n\nScheduled job failed at %s\n\nError: %s",
 			time.Now().Format("2006-01-02 15:04:05 MST"), err.Error())
-		
+
 		if discordErr := s.discord.SendSimpleMessage(errorMsg); discordErr != nil {
 			log.Printf("Failed to send error notification to Discord: %v", discordErr)
 		}
@@ -159,7 +159,7 @@ func (s *Scheduler) executeNewsJob() error {
 // executeNewsJobByType executes the complete news processing pipeline for a specific type
 func (s *Scheduler) executeNewsJobByType(newsType string) error {
 	startTime := time.Now()
-	
+
 	s.mu.Lock()
 	s.jobStatus.Status = "running"
 	s.jobStatus.Error = ""
@@ -199,11 +199,13 @@ func (s *Scheduler) executeNewsJobByType(newsType string) error {
 	log.Printf("Step 3: Sending %s news to Discord...", newsType)
 	var discordErr error
 	if newsType == "global" {
+		log.Printf("Using global Discord webhook for %s news", newsType)
 		discordErr = s.discordGlobal.SendNewsByType(newsResponse, newsType)
 	} else {
+		log.Printf("Using AI Discord webhook for %s news", newsType)
 		discordErr = s.discord.SendNewsByType(newsResponse, newsType)
 	}
-	
+
 	if discordErr != nil {
 		s.updateJobStatus("failed", len(newsResponse.News), discordErr.Error())
 		return fmt.Errorf("failed to send %s news to Discord: %w", newsType, discordErr)
@@ -211,9 +213,9 @@ func (s *Scheduler) executeNewsJobByType(newsType string) error {
 
 	// Update job status
 	s.updateJobStatus("success", len(newsResponse.News), "")
-	
+
 	duration := time.Since(startTime)
-	log.Printf("%s news job completed successfully in %v - sent %d news items to Discord", 
+	log.Printf("%s news job completed successfully in %v - sent %d news items to Discord",
 		strings.Title(newsType), duration, len(newsResponse.News))
 
 	return nil
@@ -223,7 +225,7 @@ func (s *Scheduler) executeNewsJobByType(newsType string) error {
 func (s *Scheduler) GetJobStatus() *models.JobStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	status := *s.jobStatus // Copy the status
 	return &status
 }
@@ -239,7 +241,7 @@ func (s *Scheduler) IsRunning() bool {
 func (s *Scheduler) updateJobStatus(status string, newsCount int, errorMsg string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.jobStatus.LastRun = time.Now()
 	s.jobStatus.Status = status
 	s.jobStatus.NewsCount = newsCount
@@ -250,20 +252,20 @@ func (s *Scheduler) updateJobStatus(status string, newsCount int, errorMsg strin
 func (s *Scheduler) updateNextRunTime() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Calculate next 08:00 in the configured timezone
 	location, err := time.LoadLocation(s.config.Timezone)
 	if err != nil {
 		location = time.UTC
 	}
-	
+
 	now := time.Now().In(location)
 	next := time.Date(now.Year(), now.Month(), now.Day(), 8, 0, 0, 0, location)
-	
+
 	// If it's already past 08:00 today, schedule for tomorrow
 	if now.Hour() >= 8 {
 		next = next.Add(24 * time.Hour)
 	}
-	
+
 	s.jobStatus.NextRun = next.Format("2006-01-02 15:04:05 MST")
 }

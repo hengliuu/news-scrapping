@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -63,6 +64,8 @@ func (c *WebhookClient) SendNewsByTypeToWebhook(newsResponse *models.NewsRespons
 		return fmt.Errorf("no news items to send")
 	}
 
+	log.Printf("Sending %d %s news items to Discord webhook %s", len(newsResponse.News), newsType, webhookURL)
+
 	// Create type-specific header and emoji
 	var header string
 	var embedColor int
@@ -104,7 +107,7 @@ func (c *WebhookClient) SendNewsByTypeToWebhook(newsResponse *models.NewsRespons
 			newsResponse.TokenUsage.OutputTokens,
 			newsResponse.TokenUsage.TotalTokens)
 	}
-	
+
 	footerEmbed := DiscordEmbed{
 		Description: footerText,
 		Color:       0x7289DA, // Discord blue color
@@ -133,12 +136,14 @@ func (c *WebhookClient) sendMessageToWebhook(message DiscordMessage, webhookURL 
 	// Convert to JSON
 	jsonData, err := json.Marshal(message)
 	if err != nil {
+		log.Printf("Failed to marshal Discord message: %v", err)
 		return fmt.Errorf("failed to marshal Discord message: %w", err)
 	}
 
 	// Create HTTP request
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
+		log.Printf("Failed to create HTTP request for Discord webhook: %v", err)
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
@@ -147,6 +152,7 @@ func (c *WebhookClient) sendMessageToWebhook(message DiscordMessage, webhookURL 
 	// Send request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		log.Printf("Failed to send Discord webhook: %v", err)
 		return fmt.Errorf("failed to send Discord webhook: %w", err)
 	}
 	defer resp.Body.Close()
