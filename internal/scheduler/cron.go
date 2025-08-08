@@ -153,7 +153,32 @@ func (s *Scheduler) runNewsJob() {
 
 // executeNewsJob executes the complete AI news processing pipeline (backward compatibility)
 func (s *Scheduler) executeNewsJob() error {
-	return s.executeNewsJobByType("ai")
+	// Execute AI news first
+	aiErr := s.executeNewsJobByType("ai")
+	if aiErr != nil {
+		log.Printf("AI news job failed: %v", aiErr)
+	}
+
+	// Execute Global news
+	globalErr := s.executeNewsJobByType("global")
+	if globalErr != nil {
+		log.Printf("Global news job failed: %v", globalErr)
+	}
+
+	// Return error if both failed
+	if aiErr != nil && globalErr != nil {
+		return fmt.Errorf("both AI and Global news jobs failed - AI: %v, Global: %v", aiErr, globalErr)
+	}
+
+	// Return specific error if one failed
+	if aiErr != nil {
+		return fmt.Errorf("AI news job failed: %v", aiErr)
+	}
+	if globalErr != nil {
+		return fmt.Errorf("Global news job failed: %v", globalErr)
+	}
+
+	return nil
 }
 
 // executeNewsJobByType executes the complete news processing pipeline for a specific type

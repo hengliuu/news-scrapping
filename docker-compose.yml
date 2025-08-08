@@ -2,18 +2,18 @@ version: '3.8'
 
 services:
   news-scrapping:
-    build: .
+    image: hengliuu/newsscrapping:latest
+    container_name: news-scrapping
     ports:
       - "6005:6005"
     environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - DISCORD_WEBHOOK=${DISCORD_WEBHOOK}
+      - GEMINI_API_KEY=AIzaSyDAWjqXrL1Y4XDv6YhpzQXBpnm41_1Pl0w
+      - DISCORD_WEBHOOK_GLOBAL=https://discord.com/api/webhooks/1402585586530783313/s7XaZQPciIVAT230iSEcU_VDVemRaFKW-nCud2sSg3784ncTyt48VD8H0HhRX6QhWrrk
+      - DISCORD_WEBHOOK=https://discord.com/api/webhooks/1402585710757941358/BgD6yJokJOdcwxCclgJZQSp8WX29HpY1xC61-zjo_eDgtZLNBzb5Dx5xcE-BB6nD7Lt_
       - PORT=6005
       - GIN_MODE=release
       - TZ=Asia/Jakarta
       - LOG_LEVEL=info
-    volumes:
-      - /etc/localtime:/etc/localtime:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6005/health"]
@@ -21,10 +21,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  # Optional: Add a monitoring container
-  # watchtower:
-  #   image: containrrr/watchtower
-  #   volumes:
-  #     - /var/run/docker.sock:/var/run/docker.sock
-  #   command: --interval 300

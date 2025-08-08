@@ -18,4 +18,4 @@ Daily News on Discord for AI Tech News
 
 ## Directory Help
 Agents: .claude/agents
-Planning: .claude/planning
+Planning: .claude/planning 
